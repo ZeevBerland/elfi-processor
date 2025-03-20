@@ -48,12 +48,20 @@ export default async function handler(req, res) {
 
     console.log('Sending data to API:', apiUrl);
     console.log('File name:', filename);
+    console.log('Starting API request at:', new Date().toISOString());
     
     // Ensure we're sending the data in the correct format
     const dataToSend = Buffer.isBuffer(fileData) ? fileData : Buffer.from(fileData);
     
-    // Send binary data to the API
-    const response = await axios.post(
+    // Create a timeout promise that will reject after the specified time
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => {
+        reject(new Error('API request timed out after 120 seconds'));
+      }, 120000); // 120 seconds timeout
+    });
+    
+    // Send binary data to the API with race against timeout
+    const apiPromise = axios.post(
       apiUrl,
       dataToSend,
       {
@@ -61,11 +69,17 @@ export default async function handler(req, res) {
           'Content-Type': 'application/octet-stream',
           'X-Filename': filename
         },
-        timeout: 60000, // 60 seconds timeout
-        responseType: 'json'
+        timeout: 120000, // 120 seconds timeout (increased from 60s)
+        responseType: 'json',
+        maxContentLength: Infinity,
+        maxBodyLength: Infinity
       }
     );
+    
+    // Race the API request against the timeout
+    const response = await Promise.race([apiPromise, timeoutPromise]);
 
+    console.log('API response received at:', new Date().toISOString());
     console.log('API response status:', response.status);
     console.log('API response headers:', response.headers);
     
@@ -99,7 +113,17 @@ export default async function handler(req, res) {
     });
   } catch (error) {
     console.error('Error processing bin file:', error);
-    // Return more detailed error information
+    
+    // Handle timeout errors specifically
+    if (error.message && (error.message.includes('timeout') || error.code === 'ECONNABORTED')) {
+      return res.status(504).json({
+        success: false,
+        error: 'The request to process the file timed out. The file may be too large or the service is temporarily busy.',
+        timeoutError: true
+      });
+    }
+    
+    // Handle other errors
     return res.status(500).json({
       success: false,
       error: error.message || 'An error occurred while processing the file',
