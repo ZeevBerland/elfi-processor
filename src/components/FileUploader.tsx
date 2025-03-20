@@ -1,87 +1,115 @@
 import React, { useCallback, useState } from 'react';
-import { UploadIcon } from 'lucide-react';
+import { Upload, AlertCircle } from 'lucide-react';
 
 interface FileUploaderProps {
   onFileUpload: (file: File) => void;
-  uploadState: string;
-  setUploadState: (state: 'idle' | 'dragging') => void;
+  uploadState: 'idle' | 'dragging' | 'processing' | 'success' | 'error';
+  setUploadState: (state: 'idle' | 'dragging' | 'processing' | 'success' | 'error') => void;
 }
 
-const FileUploader: React.FC<FileUploaderProps> = ({
-  onFileUpload,
-  uploadState,
-  setUploadState
-}) => {
-  const [isDragActive, setIsDragActive] = useState(false);
-  
+const FileUploader: React.FC<FileUploaderProps> = ({ onFileUpload, uploadState, setUploadState }) => {
+  const [fileError, setFileError] = useState<string | null>(null);
+
   const handleDragEnter = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    setIsDragActive(true);
     setUploadState('dragging');
   }, [setUploadState]);
-  
+
   const handleDragLeave = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    setIsDragActive(false);
     setUploadState('idle');
   }, [setUploadState]);
-  
+
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
   }, []);
-  
+
+  const validateFile = useCallback((file: File): boolean => {
+    console.log('Validating file:', file.name, 'Type:', file.type, 'Size:', file.size);
+    
+    if (!file.name.endsWith('.bin')) {
+      setFileError('Please upload a .bin file');
+      return false;
+    }
+    
+    if (file.size === 0) {
+      setFileError('File is empty');
+      return false;
+    }
+    
+    // Clear previous errors
+    setFileError(null);
+    return true;
+  }, []);
+
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    setIsDragActive(false);
     setUploadState('idle');
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      onFileUpload(e.dataTransfer.files[0]);
+    
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      const file = e.dataTransfer.files[0];
+      console.log('File dropped:', file.name);
+      
+      if (validateFile(file)) {
+        onFileUpload(file);
+      }
     }
-  }, [onFileUpload, setUploadState]);
-  
-  const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      onFileUpload(e.target.files[0]);
+  }, [onFileUpload, setUploadState, validateFile]);
+
+  const handleFileInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
+      const file = e.target.files[0];
+      console.log('File selected:', file.name);
+      
+      if (validateFile(file)) {
+        onFileUpload(file);
+      }
     }
-  }, [onFileUpload]);
-  
+  }, [onFileUpload, validateFile]);
+
   return (
     <div 
-      className={`relative border-2 rounded-xl p-4 sm:p-6 md:p-8 transition-all duration-200 ease-in-out text-center backdrop-blur-sm
-        ${isDragActive ? 'border-white bg-white/10' : 'border-white/50 bg-white/5 hover:border-white/80'}`} 
-      onDragEnter={handleDragEnter} 
-      onDragLeave={handleDragLeave} 
-      onDragOver={handleDragOver} 
+      className={`w-full border-2 border-dashed rounded-lg p-6 text-center transition-colors duration-300 
+        ${uploadState === 'dragging' 
+          ? 'border-blue-300 bg-blue-50/10' 
+          : 'border-blue-200/50 hover:border-blue-300/70'}`}
+      onDragEnter={handleDragEnter}
+      onDragLeave={handleDragLeave}
+      onDragOver={handleDragOver}
       onDrop={handleDrop}
     >
-      <input 
-        type="file" 
-        id="file-upload" 
-        className="hidden" 
-        accept=".bin" 
-        onChange={handleFileChange} 
-      />
-      <div className="flex flex-col items-center justify-center space-y-4 sm:space-y-6">
-        <div className={`rounded-full p-4 sm:p-5 md:p-6 border-2 ${isDragActive ? 'border-white bg-white/10' : 'border-white/50'}`}>
-          <UploadIcon className="h-8 w-8 sm:h-10 sm:w-10 md:h-12 md:w-12 text-white" />
+      <div className="flex flex-col items-center justify-center space-y-4">
+        <div className="bg-blue-500/20 w-16 h-16 rounded-full flex items-center justify-center">
+          <Upload size={30} className="text-blue-100" />
         </div>
-        <div>
-          <p className="text-base sm:text-lg md:text-xl font-medium mb-2 text-white">
-            {isDragActive ? 'Drop your file here' : 'Drag & drop your .bin file here'}
+        
+        <div className="text-center">
+          <h3 className="text-xl text-white font-medium">Upload .bin file</h3>
+          <p className="mt-1 text-blue-100/80 text-sm">
+            Drag and drop your file here, or click to browse
           </p>
-          <p className="text-blue-100 mb-3 sm:mb-4">or</p>
-          <label 
-            htmlFor="file-upload" 
-            className="cursor-pointer py-2 sm:py-3 px-4 sm:px-6 bg-green-600 hover:bg-green-700 text-white font-medium rounded-md transition-colors duration-200 inline-block text-sm sm:text-base"
-          >
-            Browse files
-          </label>
         </div>
-        <p className="text-xs sm:text-sm text-blue-100">Only .bin files are supported</p>
+        
+        {fileError && (
+          <div className="flex items-center text-red-300 bg-red-500/10 px-3 py-2 rounded text-sm">
+            <AlertCircle size={16} className="mr-2" />
+            {fileError}
+          </div>
+        )}
+        
+        <label className="mt-2 cursor-pointer bg-blue-600 hover:bg-blue-700 transition-colors text-white py-2 px-4 rounded-md shadow-sm text-sm font-medium">
+          Browse Files
+          <input 
+            type="file" 
+            className="hidden" 
+            onChange={handleFileInputChange} 
+            accept=".bin"
+          />
+        </label>
       </div>
     </div>
   );

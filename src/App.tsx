@@ -41,13 +41,19 @@ export function App() {
     setUploadState('processing');
     
     try {
+      console.log('Starting file upload for:', file.name);
+      
+      // Read the file as an ArrayBuffer
+      const arrayBuffer = await file.arrayBuffer();
+      const fileData = new Uint8Array(arrayBuffer);
+      
       // Use the API endpoint
       const serverUrl = '/api/process-bin';
       
-      // Send the file to our API
+      // Send the binary data to our API
       const response = await fetch(serverUrl, {
         method: 'POST',
-        body: file,
+        body: fileData,
         headers: {
           'Content-Type': 'application/octet-stream',
           'X-Filename': file.name
@@ -55,10 +61,13 @@ export function App() {
       });
       
       if (!response.ok) {
+        const errorText = await response.text();
+        console.error('Server response error:', response.status, errorText);
         throw new Error(`Server request failed with status: ${response.status}`);
       }
       
       const data = await response.json();
+      console.log('API response received:', data);
       
       if (!data.success) {
         throw new Error(data.error || 'Processing failed');
