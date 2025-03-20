@@ -1,0 +1,43 @@
+{
+  "Results": {
+    "HR": 93,
+    "BloodCirculation": 54,
+    "BC2": 101,
+    "BC3": 765,
+    "BC4": 1,
+    "BC5": 231,
+    "BC6": 4257,
+    "FitnessRaw": 33,
+    "Metabolism": 1665,
+    "Hydration": 81,
+    "Calmness": 48,
+    "FitnessAvg": 33,
+    "Wellness": 3
+  },
+  "Ranges": {
+    "HR": {
+      "MinVal": 63,
+      "MaxVal": 73
+    },
+    "BloodCirculation": {
+      "MinVal": 439,
+      "MaxVal": 638
+    },
+    "Metabolism": {
+      "MinVal": 1758,
+      "MaxVal": 2097
+    },
+    "Hydration": {
+      "MinVal": 33,
+      "MaxVal": 67
+    },
+    "Calmness": {
+      "MinVal": 46,
+      "MaxVal": 50
+    },
+    "FitnessAvg": {
+      "MinVal": 76,
+      "MaxVal": 85
+    }
+  }
+}
