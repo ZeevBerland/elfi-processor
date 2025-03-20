@@ -1,5 +1,5 @@
 import React from 'react';
-import { CheckCircleIcon, DownloadIcon, RefreshCwIcon } from 'lucide-react';
+import { CheckCircleIcon, DownloadIcon, RefreshCwIcon, ClockIcon } from 'lucide-react';
 
 interface SuccessMessageProps {
   fileName: string;
@@ -8,12 +8,14 @@ interface SuccessMessageProps {
     csvString: string;
     csvFileName: string;
   } | null;
+  processingTime?: number | null;
 }
 
 const SuccessMessage: React.FC<SuccessMessageProps> = ({
   fileName,
   onReset,
-  csvData
+  csvData,
+  processingTime = null
 }) => {
   const handleDownload = () => {
     if (csvData && csvData.csvString) {
@@ -51,11 +53,19 @@ const SuccessMessage: React.FC<SuccessMessageProps> = ({
           <h2 className="text-xl sm:text-2xl font-semibold text-white mb-2">
             File Processed Successfully!
           </h2>
-          <p className="text-sm sm:text-base text-blue-100 mb-4 sm:mb-6 max-w-full break-words">
+          <p className="text-sm sm:text-base text-blue-100 mb-4 max-w-full break-words">
             Your file <span className="font-medium hidden sm:inline">{fileName}</span>
             <span className="font-medium sm:hidden">{shortFileName}</span> has been
             converted to CSV format.
           </p>
+          
+          {processingTime && (
+            <div className="flex items-center justify-center gap-2 text-xs sm:text-sm text-green-300 mb-4">
+              <ClockIcon className="h-4 w-4" />
+              <span>Processing time: {(processingTime / 1000).toFixed(1)} seconds</span>
+            </div>
+          )}
+          
           <div className="flex flex-col sm:flex-row justify-center gap-3 sm:gap-4">
             <button 
               onClick={handleDownload} 

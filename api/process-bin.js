@@ -19,10 +19,10 @@ export default async function handler(req, res) {
     return res.status(405).json({ success: false, error: 'Method not allowed' });
   }
 
+  const startTime = Date.now();
+  console.log(`[${new Date().toISOString()}] Request started`);
+
   try {
-    // Log the request headers for debugging
-    console.log('Request headers:', req.headers);
-    
     // Get binary data from request body
     const fileData = req.body;
     
@@ -30,14 +30,11 @@ export default async function handler(req, res) {
       return res.status(400).json({ success: false, error: 'No binary data received' });
     }
     
-    console.log('Received file data type:', typeof fileData);
-    console.log('File data is Buffer?', Buffer.isBuffer(fileData));
-    console.log('File data length:', fileData.length || 'N/A');
-
-    // Log first few bytes for debugging (if it's a buffer)
-    if (Buffer.isBuffer(fileData) && fileData.length > 0) {
-      console.log('First 20 bytes:', fileData.slice(0, 20).toString('hex'));
-    }
+    // Basic file data logging - don't log full byte array to avoid memory issues
+    console.log(`Received file data type: ${typeof fileData}`);
+    console.log(`File data is Buffer: ${Buffer.isBuffer(fileData)}`);
+    console.log(`File data length: ${fileData.length || 'N/A'} bytes`);
+    console.log(`Time to receive data: ${Date.now() - startTime}ms`);
 
     // Get filename from headers or generate one
     const filename = req.headers['x-filename'] || `file_${Date.now()}`;
@@ -46,80 +43,74 @@ export default async function handler(req, res) {
     // API Gateway endpoint URL
     const apiUrl = "https://gdtylrq5q2.execute-api.us-east-1.amazonaws.com/prod/process";
 
-    console.log('Sending data to API:', apiUrl);
-    console.log('File name:', filename);
-    console.log('Starting API request at:', new Date().toISOString());
+    console.log(`[${new Date().toISOString()}] Sending data to API: ${apiUrl}`);
+    console.log(`File name: ${filename}`);
     
-    // Ensure we're sending the data in the correct format
+    // Ensure we're sending the data in the correct format - use the raw buffer directly if possible
     const dataToSend = Buffer.isBuffer(fileData) ? fileData : Buffer.from(fileData);
     
-    // Create a timeout promise that will reject after the specified time
-    const timeoutPromise = new Promise((_, reject) => {
-      setTimeout(() => {
-        reject(new Error('API request timed out after 120 seconds'));
-      }, 120000); // 120 seconds timeout
-    });
+    // For extreme efficiency, set up timeout but don't waste memory on race promises
+    const apiStartTime = Date.now();
     
-    // Send binary data to the API with race against timeout
-    const apiPromise = axios.post(
-      apiUrl,
-      dataToSend,
-      {
-        headers: { 
-          'Content-Type': 'application/octet-stream',
-          'X-Filename': filename
-        },
-        timeout: 120000, // 120 seconds timeout (increased from 60s)
-        responseType: 'json',
-        maxContentLength: Infinity,
-        maxBodyLength: Infinity
-      }
-    );
+    const axiosConfig = {
+      headers: { 
+        'Content-Type': 'application/octet-stream',
+        'X-Filename': filename
+      },
+      timeout: 45000, // 45 seconds timeout to leave buffer for response processing
+      responseType: 'json',
+      maxContentLength: Infinity,
+      maxBodyLength: Infinity
+    };
     
-    // Race the API request against the timeout
-    const response = await Promise.race([apiPromise, timeoutPromise]);
-
-    console.log('API response received at:', new Date().toISOString());
-    console.log('API response status:', response.status);
-    console.log('API response headers:', response.headers);
+    // Split the process - first send data to API
+    console.log(`Starting API request at: ${new Date().toISOString()}`);
+    const response = await axios.post(apiUrl, dataToSend, axiosConfig);
+    
+    console.log(`API response received after ${Date.now() - apiStartTime}ms`);
+    console.log(`Response status: ${response.status}`);
     
     if (response.status !== 200) {
       throw new Error(`API request failed with status: ${response.status}`);
     }
 
+    // Process the API response
+    const processStartTime = Date.now();
     const results = response.data.Results;
     
     if (!results) {
-      console.log('Full API response:', response.data);
+      console.log('Invalid API response:', response.data);
       throw new Error('Invalid response from API: Results field is missing');
     }
     
-    // Create CSV data
-    const csvData = Object.entries(results).map(([metric, value]) => ({
-      metric,
-      value
-    }));
+    // Create CSV string efficiently
+    let csvString = 'Metric,Value\n';
+    for (const [metric, value] of Object.entries(results)) {
+      csvString += `${metric},${value}\n`;
+    }
 
-    // Create CSV string
-    const csvString = 'Metric,Value\n' + 
-      csvData.map(row => `${row.metric},${row.value}`).join('\n');
+    console.log(`CSV generation completed in ${Date.now() - processStartTime}ms`);
+    console.log(`Total processing time: ${Date.now() - startTime}ms`);
 
     // Return success response with JSON data and CSV content
     return res.status(200).json({
       success: true,
       results: response.data,
       csvString: csvString,
-      csvFileName: `${baseFilename}.csv`
+      csvFileName: `${baseFilename}.csv`,
+      processingTime: Date.now() - startTime
     });
   } catch (error) {
-    console.error('Error processing bin file:', error);
+    const totalTime = Date.now() - startTime;
+    console.error(`Error after ${totalTime}ms:`, error.message);
     
     // Handle timeout errors specifically
     if (error.message && (error.message.includes('timeout') || error.code === 'ECONNABORTED')) {
-      return res.status(504).json({
+      return res.status(408).json({
         success: false,
-        error: 'The request to process the file timed out. The file may be too large or the service is temporarily busy.',
-        timeoutError: true
+        error: 'The file processing timed out. The file may be too large or the service is temporarily busy.',
+        timeoutError: true,
+        processingTime: totalTime
       });
     }
     
@@ -127,8 +118,9 @@ export default async function handler(req, res) {
     return res.status(500).json({
       success: false,
       error: error.message || 'An error occurred while processing the file',
-      stack: error.stack,
-      name: error.name
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined,
+      name: error.name,
+      processingTime: totalTime
     });
   }
 } 

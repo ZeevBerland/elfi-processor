@@ -30,6 +30,7 @@ export function App() {
     csvFileName: string;
   } | null>(null);
   const [isTimeout, setIsTimeout] = useState<boolean>(false);
+  const [processingTime, setProcessingTime] = useState<number | null>(null);
 
   const handleFileUpload = async (file: File) => {
     if (!file.name.endsWith('.bin')) {
@@ -38,82 +39,115 @@ export function App() {
       return;
     }
 
+    const fileSizeMB = file.size / (1024 * 1024);
+    console.log(`Processing file: ${file.name}, Size: ${fileSizeMB.toFixed(2)}MB`);
+    
+    // Show warning for large files
+    if (fileSizeMB > 5) {
+      console.warn(`Large file detected: ${fileSizeMB.toFixed(2)}MB - might time out`);
+    }
+
     setFileName(file.name);
     setUploadState('processing');
     setIsTimeout(false);
+    setProcessingTime(null);
+    
+    const processingStartTime = Date.now();
     
     try {
-      console.log('Starting file upload for:', file.name);
-      console.log('File size:', file.size, 'bytes');
-      
-      // Check file size before proceeding
-      if (file.size > 10 * 1024 * 1024) { // 10MB limit
-        console.warn('Large file detected:', file.size, 'bytes');
-      }
-      
       // Read the file as an ArrayBuffer
       const arrayBuffer = await file.arrayBuffer();
       const fileData = new Uint8Array(arrayBuffer);
       
+      console.log(`File read complete. Sending to API at ${new Date().toISOString()}`);
+      
       // Use the API endpoint
       const serverUrl = '/api/process-bin';
       
-      console.log('Sending request to API at:', new Date().toISOString());
+      // Create AbortController to handle timeouts on our end
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 55000); // 55 second client-side timeout
       
-      // Send the binary data to our API
-      const response = await fetch(serverUrl, {
-        method: 'POST',
-        body: fileData,
-        headers: {
-          'Content-Type': 'application/octet-stream',
-          'X-Filename': file.name
-        },
-      });
-      
-      console.log('Response received at:', new Date().toISOString());
-      console.log('Response status:', response.status);
-      
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('Server response error:', response.status, errorText);
+      try {
+        // Send the binary data to our API
+        const response = await fetch(serverUrl, {
+          method: 'POST',
+          body: fileData,
+          headers: {
+            'Content-Type': 'application/octet-stream',
+            'X-Filename': file.name
+          },
+          signal: controller.signal
+        });
         
-        let errorData;
-        try {
-          errorData = JSON.parse(errorText);
-        } catch (e) {
-          errorData = null;
+        // Clear the timeout since request completed
+        clearTimeout(timeoutId);
+        
+        const totalTime = Date.now() - processingStartTime;
+        console.log(`Response received after ${totalTime}ms with status: ${response.status}`);
+        
+        if (!response.ok) {
+          let errorMsg = 'Server request failed';
+          
+          try {
+            const errorData = await response.json();
+            console.error('Server response error:', response.status, errorData);
+            
+            if (errorData && errorData.processingTime) {
+              setProcessingTime(errorData.processingTime);
+            }
+            
+            // Check for timeout error
+            if (response.status === 408 || (errorData && errorData.timeoutError)) {
+              setIsTimeout(true);
+              errorMsg = errorData.error || 'Processing timed out';
+            } else {
+              errorMsg = errorData.error || `Server request failed with status: ${response.status}`;
+            }
+          } catch (e) {
+            // If we can't parse the error as JSON, use text
+            const errorText = await response.text();
+            console.error('Server response error (text):', errorText);
+            errorMsg = errorText || `Server request failed with status: ${response.status}`;
+          }
+          
+          throw new Error(errorMsg);
         }
         
-        // Check for timeout error
-        if (response.status === 504 || (errorData && errorData.timeoutError)) {
+        const data = await response.json();
+        console.log(`API processing completed in ${data.processingTime || 'unknown'}ms`);
+        
+        if (data.processingTime) {
+          setProcessingTime(data.processingTime);
+        }
+        
+        if (!data.success) {
+          throw new Error(data.error || 'Processing failed');
+        }
+        
+        // Set the results and CSV data
+        setApiResults(data.results.Results);
+        setCsvData({
+          csvString: data.csvString,
+          csvFileName: data.csvFileName
+        });
+        
+        setUploadState('success');
+      } catch (fetchError: unknown) {
+        // This catches abort errors from our controller
+        if (fetchError instanceof Error && fetchError.name === 'AbortError') {
           setIsTimeout(true);
-          throw new Error('Processing timed out. The file may be too large or complex.');
+          throw new Error('Request timed out after 55 seconds');
         }
-        
-        throw new Error(`Server request failed with status: ${response.status}`);
+        throw fetchError;
       }
-      
-      const data = await response.json();
-      console.log('API response received:', data);
-      
-      if (!data.success) {
-        throw new Error(data.error || 'Processing failed');
-      }
-      
-      // Set the results and CSV data
-      setApiResults(data.results.Results);
-      setCsvData({
-        csvString: data.csvString,
-        csvFileName: data.csvFileName
-      });
-      
-      setUploadState('success');
     } catch (error) {
-      console.error('Error processing file:', error);
+      const totalTime = Date.now() - processingStartTime;
+      console.error(`Error after ${totalTime}ms:`, error);
       
       let errorMsg = error instanceof Error ? error.message : 'Unknown error';
       
-      // Handle timeout error with a more user-friendly message
+      // Set timeout flag if it looks like a timeout error
       if (isTimeout || errorMsg.includes('timeout') || errorMsg.includes('timed out')) {
         setIsTimeout(true);
         errorMsg = 'The file processing timed out. The file may be too large or the service is temporarily busy. Please try again with a smaller file or try later.';
@@ -131,6 +165,7 @@ export function App() {
     setApiResults(null);
     setCsvData(null);
     setIsTimeout(false);
+    setProcessingTime(null);
   };
 
   return (
@@ -156,8 +191,18 @@ export function App() {
               setUploadState={setUploadState} 
             /> : uploadState === 'processing' ? 
             <ProgressIndicator fileName={fileName} /> : uploadState === 'success' ? 
-            <SuccessMessage fileName={fileName} onReset={resetUpload} csvData={csvData} /> : 
-            <ErrorMessage message={errorMessage} onReset={resetUpload} isTimeout={isTimeout} />
+            <SuccessMessage 
+              fileName={fileName} 
+              onReset={resetUpload} 
+              csvData={csvData}
+              processingTime={processingTime} 
+            /> : 
+            <ErrorMessage 
+              message={errorMessage} 
+              onReset={resetUpload} 
+              isTimeout={isTimeout}
+              processingTime={processingTime} 
+            />
           }
         </div>
         

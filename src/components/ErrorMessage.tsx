@@ -5,12 +5,14 @@ interface ErrorMessageProps {
   message: string;
   onReset: () => void;
   isTimeout?: boolean;
+  processingTime?: number | null;
 }
 
 const ErrorMessage: React.FC<ErrorMessageProps> = ({
   message,
   onReset,
-  isTimeout = false
+  isTimeout = false,
+  processingTime = null
 }) => {
   return (
     <div className="rounded-xl p-4 sm:p-6 md:p-8 backdrop-blur-sm bg-white/5 border-2 border-white/50">
@@ -30,6 +32,9 @@ const ErrorMessage: React.FC<ErrorMessageProps> = ({
           {isTimeout && (
             <p className="text-xs sm:text-sm text-orange-300 mb-4">
               Consider using a smaller .bin file or try again when the system is less busy.
+              {processingTime && (
+                <span className="block mt-1">Processing time: {(processingTime / 1000).toFixed(1)}s</span>
+              )}
             </p>
           )}
           <button 
