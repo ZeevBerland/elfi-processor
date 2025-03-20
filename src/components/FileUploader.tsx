@@ -5,9 +5,15 @@ interface FileUploaderProps {
   onFileUpload: (file: File) => void;
   uploadState: 'idle' | 'dragging' | 'processing' | 'success' | 'error';
   setUploadState: (state: 'idle' | 'dragging' | 'processing' | 'success' | 'error') => void;
+  maxFileSize?: number;
 }
 
-const FileUploader: React.FC<FileUploaderProps> = ({ onFileUpload, uploadState, setUploadState }) => {
+const FileUploader: React.FC<FileUploaderProps> = ({ 
+  onFileUpload, 
+  uploadState, 
+  setUploadState,
+  maxFileSize = 1024 * 1024 * 10 // Default 10MB if not specified
+}) => {
   const [fileError, setFileError] = useState<string | null>(null);
 
   const handleDragEnter = useCallback((e: React.DragEvent) => {
@@ -40,10 +46,16 @@ const FileUploader: React.FC<FileUploaderProps> = ({ onFileUpload, uploadState, 
       return false;
     }
     
+    if (file.size > maxFileSize) {
+      const sizeMB = maxFileSize / (1024 * 1024);
+      setFileError(`File size exceeds the ${sizeMB}MB limit for serverless processing`);
+      return false;
+    }
+    
     // Clear previous errors
     setFileError(null);
     return true;
-  }, []);
+  }, [maxFileSize]);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -71,6 +83,12 @@ const FileUploader: React.FC<FileUploaderProps> = ({ onFileUpload, uploadState, 
     }
   }, [onFileUpload, validateFile]);
 
+  // Format the max file size for display
+  const formatFileSize = (bytes: number): string => {
+    const mb = bytes / (1024 * 1024);
+    return mb >= 1 ? `${mb.toFixed(0)}MB` : `${(bytes / 1024).toFixed(0)}KB`;
+  };
+
   return (
     <div 
       className={`w-full border-2 border-dashed rounded-lg p-6 text-center transition-colors duration-300 
@@ -92,12 +110,15 @@ const FileUploader: React.FC<FileUploaderProps> = ({ onFileUpload, uploadState, 
           <p className="mt-1 text-blue-100/80 text-sm">
             Drag and drop your file here, or click to browse
           </p>
+          <p className="mt-1 text-blue-100/60 text-xs">
+            Maximum file size: {formatFileSize(maxFileSize)}
+          </p>
         </div>
         
         {fileError && (
           <div className="flex items-center text-red-300 bg-red-500/10 px-3 py-2 rounded text-sm">
-            <AlertCircle size={16} className="mr-2" />
-            {fileError}
+            <AlertCircle size={16} className="mr-2 flex-shrink-0" />
+            <span>{fileError}</span>
           </div>
         )}
         

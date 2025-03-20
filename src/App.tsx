@@ -20,6 +20,9 @@ interface ApiResponse {
   };
 }
 
+// Maximum file size (5MB in bytes)
+const MAX_FILE_SIZE = 5 * 1024 * 1024;
+
 export function App() {
   const [uploadState, setUploadState] = useState<'idle' | 'dragging' | 'processing' | 'success' | 'error'>('idle');
   const [fileName, setFileName] = useState<string>('');
@@ -31,6 +34,7 @@ export function App() {
   } | null>(null);
   const [isTimeout, setIsTimeout] = useState<boolean>(false);
   const [processingTime, setProcessingTime] = useState<number | null>(null);
+  const [isSizeError, setIsSizeError] = useState<boolean>(false);
 
   const handleFileUpload = async (file: File) => {
     if (!file.name.endsWith('.bin')) {
@@ -42,15 +46,19 @@ export function App() {
     const fileSizeMB = file.size / (1024 * 1024);
     console.log(`Processing file: ${file.name}, Size: ${fileSizeMB.toFixed(2)}MB`);
     
-    // Show warning for large files
-    if (fileSizeMB > 5) {
-      console.warn(`Large file detected: ${fileSizeMB.toFixed(2)}MB - might time out`);
+    // Check if file size exceeds the limit
+    if (file.size > MAX_FILE_SIZE) {
+      setIsSizeError(true);
+      setErrorMessage(`File too large (${fileSizeMB.toFixed(2)}MB). Please use a file smaller than 5MB for serverless processing.`);
+      setUploadState('error');
+      return;
     }
-
+    
     setFileName(file.name);
     setUploadState('processing');
     setIsTimeout(false);
     setProcessingTime(null);
+    setIsSizeError(false);
     
     const processingStartTime = Date.now();
     
@@ -66,7 +74,7 @@ export function App() {
       
       // Create AbortController to handle timeouts on our end
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 55000); // 55 second client-side timeout
+      const timeoutId = setTimeout(() => controller.abort(), 28000); // 28 second client-side timeout (shorter than serverless function)
       
       try {
         // Send the binary data to our API
@@ -90,6 +98,11 @@ export function App() {
           // Handle error response
           let errorMsg = `Server request failed with status: ${response.status}`;
           setProcessingTime(totalTime);
+          
+          // Check for specific error codes
+          if (response.status === 413) {
+            setIsSizeError(true);
+          }
           
           // Only try to read the body once using a safe approach
           try {
@@ -161,7 +174,7 @@ export function App() {
         // This catches abort errors from our controller
         if (fetchError instanceof Error && fetchError.name === 'AbortError') {
           setIsTimeout(true);
-          throw new Error('Request timed out after 55 seconds');
+          throw new Error('Request timed out after 28 seconds');
         }
         throw fetchError;
       }
@@ -171,8 +184,11 @@ export function App() {
       
       let errorMsg = error instanceof Error ? error.message : 'Unknown error';
       
-      // Set timeout flag if it looks like a timeout error
-      if (isTimeout || errorMsg.includes('timeout') || errorMsg.includes('timed out')) {
+      // Check for specific error types
+      if (errorMsg.includes('FUNCTION_INVOCATION_TIMEOUT')) {
+        setIsTimeout(true);
+        errorMsg = 'The file processing exceeded the serverless function time limit. Please use a smaller file.';
+      } else if (isTimeout || errorMsg.includes('timeout') || errorMsg.includes('timed out')) {
         setIsTimeout(true);
         errorMsg = 'The file processing timed out. The file may be too large or the service is temporarily busy. Please try again with a smaller file or try later.';
       }
@@ -190,6 +206,7 @@ export function App() {
     setCsvData(null);
     setIsTimeout(false);
     setProcessingTime(null);
+    setIsSizeError(false);
   };
 
   return (
@@ -205,6 +222,9 @@ export function App() {
           <p className="text-sm sm:text-base md:text-lg text-blue-100 mt-2">
             Upload a .bin file to convert it to CSV format
           </p>
+          <p className="text-xs text-blue-200 mt-1">
+            File size limit: 5MB for serverless processing
+          </p>
         </header>
 
         <div className="w-full max-w-lg mx-auto mb-6 sm:mb-8 md:mb-12">
@@ -213,6 +233,7 @@ export function App() {
               onFileUpload={handleFileUpload} 
               uploadState={uploadState} 
               setUploadState={setUploadState} 
+              maxFileSize={MAX_FILE_SIZE}
             /> : uploadState === 'processing' ? 
             <ProgressIndicator fileName={fileName} /> : uploadState === 'success' ? 
             <SuccessMessage 
@@ -225,6 +246,7 @@ export function App() {
               message={errorMessage} 
               onReset={resetUpload} 
               isTimeout={isTimeout}
+              isSizeError={isSizeError}
               processingTime={processingTime} 
             />
           }

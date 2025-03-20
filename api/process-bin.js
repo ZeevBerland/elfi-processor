@@ -30,11 +30,17 @@ export default async function handler(req, res) {
       return res.status(400).json({ success: false, error: 'No binary data received' });
     }
     
-    // Basic file data logging - don't log full byte array to avoid memory issues
-    console.log(`Received file data type: ${typeof fileData}`);
-    console.log(`File data is Buffer: ${Buffer.isBuffer(fileData)}`);
-    console.log(`File data length: ${fileData.length || 'N/A'} bytes`);
-    console.log(`Time to receive data: ${Date.now() - startTime}ms`);
+    // Minimize logging to reduce execution time
+    console.log(`Received file: ${fileData.length || 'N/A'} bytes at ${new Date().toISOString()}`);
+
+    // Check file size - prevent processing files that are too large for the serverless function
+    if (fileData.length > 5 * 1024 * 1024) { // 5MB limit
+      return res.status(413).json({
+        success: false,
+        error: 'File too large for serverless processing. Please use a file smaller than 5MB.',
+        processingTime: Date.now() - startTime
+      });
+    }
 
     // Get filename from headers or generate one
     const filename = req.headers['x-filename'] || `file_${Date.now()}`;
@@ -42,9 +48,6 @@ export default async function handler(req, res) {
     
     // API Gateway endpoint URL
     const apiUrl = "https://gdtylrq5q2.execute-api.us-east-1.amazonaws.com/prod/process";
-
-    console.log(`[${new Date().toISOString()}] Sending data to API: ${apiUrl}`);
-    console.log(`File name: ${filename}`);
     
     // Ensure the data is a Buffer for binary transmission
     const dataToSend = Buffer.isBuffer(fileData) ? fileData : Buffer.from(fileData);
@@ -58,38 +61,29 @@ export default async function handler(req, res) {
       });
     }
     
-    // For extreme efficiency, set up timeout but don't waste memory on race promises
-    const apiStartTime = Date.now();
-    
     try {
+      // Optimized axios config with shorter timeout
       const axiosConfig = {
         headers: { 
           'Content-Type': 'application/octet-stream',
           'X-Filename': filename
         },
-        timeout: 45000, // 45 seconds timeout to leave buffer for response processing
+        timeout: 25000, // 25 seconds timeout to stay well within Vercel's limits
         responseType: 'json',
-        maxContentLength: Infinity,
-        maxBodyLength: Infinity
+        maxContentLength: 10 * 1024 * 1024, // 10MB
+        maxBodyLength: 10 * 1024 * 1024 // 10MB
       };
       
-      // Split the process - first send data to API
-      console.log(`Starting API request at: ${new Date().toISOString()}`);
+      console.log(`Sending to API at ${new Date().toISOString()}`);
       const response = await axios.post(apiUrl, dataToSend, axiosConfig);
-      
-      console.log(`API response received after ${Date.now() - apiStartTime}ms`);
-      console.log(`Response status: ${response.status}`);
+      console.log(`API response received: status ${response.status}`);
       
       if (response.status !== 200) {
         throw new Error(`API request failed with status: ${response.status}`);
       }
 
-      // Process the API response
-      const processStartTime = Date.now();
-      
-      // Make sure we have a valid response with Results
+      // Process the API response (minimal processing to save time)
       if (!response.data || !response.data.Results) {
-        console.log('Invalid API response:', response.data);
         return res.status(500).json({
           success: false,
           error: 'Invalid response from API: Results field is missing',
@@ -99,14 +93,11 @@ export default async function handler(req, res) {
       
       const results = response.data.Results;
       
-      // Create CSV string efficiently
+      // Create CSV string efficiently - optimize for speed
       let csvString = 'Metric,Value\n';
-      for (const [metric, value] of Object.entries(results)) {
+      Object.entries(results).forEach(([metric, value]) => {
         csvString += `${metric},${value}\n`;
-      }
-
-      console.log(`CSV generation completed in ${Date.now() - processStartTime}ms`);
-      console.log(`Total processing time: ${Date.now() - startTime}ms`);
+      });
 
       // Return success response with JSON data and CSV content
       return res.status(200).json({
@@ -118,7 +109,18 @@ export default async function handler(req, res) {
       });
     } catch (apiError) {
       // Handle API-specific errors
-      console.error(`API error after ${Date.now() - apiStartTime}ms:`, apiError.message);
+      console.error(`API error: ${apiError.message}`);
+      
+      // Check if it's a timeout
+      if (apiError.code === 'ECONNABORTED' || apiError.message.includes('timeout')) {
+        return res.status(408).json({
+          success: false,
+          error: 'The external API processing timed out. Please try a smaller file or try again later.',
+          timeoutError: true,
+          processingTime: Date.now() - startTime
+        });
+      }
+      
       return res.status(502).json({
         success: false,
         error: `API request failed: ${apiError.message}`,
@@ -126,8 +128,7 @@ export default async function handler(req, res) {
       });
     }
   } catch (error) {
-    const totalTime = Date.now() - startTime;
-    console.error(`Error after ${totalTime}ms:`, error.message);
+    console.error(`Error: ${error.message}`);
     
     // Handle timeout errors specifically
     if (error.message && (error.message.includes('timeout') || error.code === 'ECONNABORTED')) {
@@ -135,7 +136,7 @@ export default async function handler(req, res) {
         success: false,
         error: 'The file processing timed out. The file may be too large or the service is temporarily busy.',
         timeoutError: true,
-        processingTime: totalTime
+        processingTime: Date.now() - startTime
       });
     }
     
@@ -143,9 +144,7 @@ export default async function handler(req, res) {
     return res.status(500).json({
       success: false,
       error: error.message || 'An error occurred while processing the file',
-      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined,
-      name: error.name,
-      processingTime: totalTime
+      processingTime: Date.now() - startTime
     });
   }
 } 
