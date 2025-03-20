@@ -46,60 +46,85 @@ export default async function handler(req, res) {
     console.log(`[${new Date().toISOString()}] Sending data to API: ${apiUrl}`);
     console.log(`File name: ${filename}`);
     
-    // Ensure we're sending the data in the correct format - use the raw buffer directly if possible
+    // Ensure the data is a Buffer for binary transmission
     const dataToSend = Buffer.isBuffer(fileData) ? fileData : Buffer.from(fileData);
+    
+    // Check if we actually have data to send
+    if (!dataToSend || dataToSend.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'Empty file or invalid data format',
+        processingTime: Date.now() - startTime
+      });
+    }
     
     // For extreme efficiency, set up timeout but don't waste memory on race promises
     const apiStartTime = Date.now();
     
-    const axiosConfig = {
-      headers: { 
-        'Content-Type': 'application/octet-stream',
-        'X-Filename': filename
-      },
-      timeout: 45000, // 45 seconds timeout to leave buffer for response processing
-      responseType: 'json',
-      maxContentLength: Infinity,
-      maxBodyLength: Infinity
-    };
-    
-    // Split the process - first send data to API
-    console.log(`Starting API request at: ${new Date().toISOString()}`);
-    const response = await axios.post(apiUrl, dataToSend, axiosConfig);
-    
-    console.log(`API response received after ${Date.now() - apiStartTime}ms`);
-    console.log(`Response status: ${response.status}`);
-    
-    if (response.status !== 200) {
-      throw new Error(`API request failed with status: ${response.status}`);
-    }
+    try {
+      const axiosConfig = {
+        headers: { 
+          'Content-Type': 'application/octet-stream',
+          'X-Filename': filename
+        },
+        timeout: 45000, // 45 seconds timeout to leave buffer for response processing
+        responseType: 'json',
+        maxContentLength: Infinity,
+        maxBodyLength: Infinity
+      };
+      
+      // Split the process - first send data to API
+      console.log(`Starting API request at: ${new Date().toISOString()}`);
+      const response = await axios.post(apiUrl, dataToSend, axiosConfig);
+      
+      console.log(`API response received after ${Date.now() - apiStartTime}ms`);
+      console.log(`Response status: ${response.status}`);
+      
+      if (response.status !== 200) {
+        throw new Error(`API request failed with status: ${response.status}`);
+      }
 
-    // Process the API response
-    const processStartTime = Date.now();
-    const results = response.data.Results;
-    
-    if (!results) {
-      console.log('Invalid API response:', response.data);
-      throw new Error('Invalid response from API: Results field is missing');
-    }
-    
-    // Create CSV string efficiently
-    let csvString = 'Metric,Value\n';
-    for (const [metric, value] of Object.entries(results)) {
-      csvString += `${metric},${value}\n`;
-    }
+      // Process the API response
+      const processStartTime = Date.now();
+      
+      // Make sure we have a valid response with Results
+      if (!response.data || !response.data.Results) {
+        console.log('Invalid API response:', response.data);
+        return res.status(500).json({
+          success: false,
+          error: 'Invalid response from API: Results field is missing',
+          processingTime: Date.now() - startTime
+        });
+      }
+      
+      const results = response.data.Results;
+      
+      // Create CSV string efficiently
+      let csvString = 'Metric,Value\n';
+      for (const [metric, value] of Object.entries(results)) {
+        csvString += `${metric},${value}\n`;
+      }
 
-    console.log(`CSV generation completed in ${Date.now() - processStartTime}ms`);
-    console.log(`Total processing time: ${Date.now() - startTime}ms`);
+      console.log(`CSV generation completed in ${Date.now() - processStartTime}ms`);
+      console.log(`Total processing time: ${Date.now() - startTime}ms`);
 
-    // Return success response with JSON data and CSV content
-    return res.status(200).json({
-      success: true,
-      results: response.data,
-      csvString: csvString,
-      csvFileName: `${baseFilename}.csv`,
-      processingTime: Date.now() - startTime
-    });
+      // Return success response with JSON data and CSV content
+      return res.status(200).json({
+        success: true,
+        results: response.data,
+        csvString: csvString,
+        csvFileName: `${baseFilename}.csv`,
+        processingTime: Date.now() - startTime
+      });
+    } catch (apiError) {
+      // Handle API-specific errors
+      console.error(`API error after ${Date.now() - apiStartTime}ms:`, apiError.message);
+      return res.status(502).json({
+        success: false,
+        error: `API request failed: ${apiError.message}`,
+        processingTime: Date.now() - startTime
+      });
+    }
   } catch (error) {
     const totalTime = Date.now() - startTime;
     console.error(`Error after ${totalTime}ms:`, error.message);

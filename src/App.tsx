@@ -87,52 +87,76 @@ export function App() {
         console.log(`Response received after ${totalTime}ms with status: ${response.status}`);
         
         if (!response.ok) {
-          let errorMsg = 'Server request failed';
+          // Handle error response
+          let errorMsg = `Server request failed with status: ${response.status}`;
+          setProcessingTime(totalTime);
           
+          // Only try to read the body once using a safe approach
           try {
-            const errorData = await response.json();
-            console.error('Server response error:', response.status, errorData);
+            // Clone the response before reading it
+            const responseClone = response.clone();
+            const responseText = await responseClone.text();
             
-            if (errorData && errorData.processingTime) {
-              setProcessingTime(errorData.processingTime);
+            try {
+              // Try to parse as JSON
+              const errorData = JSON.parse(responseText);
+              console.error('Server response error:', response.status, errorData);
+              
+              if (errorData && errorData.processingTime) {
+                setProcessingTime(errorData.processingTime);
+              }
+              
+              // Check for timeout error
+              if (response.status === 408 || (errorData && errorData.timeoutError)) {
+                setIsTimeout(true);
+                errorMsg = errorData.error || 'Processing timed out';
+              } else {
+                errorMsg = errorData.error || `Server request failed with status: ${response.status}`;
+              }
+            } catch (parseError) {
+              // Not valid JSON, use text directly
+              console.error('Server response error (text):', responseText);
+              errorMsg = responseText || `Server request failed with status: ${response.status}`;
             }
-            
-            // Check for timeout error
-            if (response.status === 408 || (errorData && errorData.timeoutError)) {
-              setIsTimeout(true);
-              errorMsg = errorData.error || 'Processing timed out';
-            } else {
-              errorMsg = errorData.error || `Server request failed with status: ${response.status}`;
-            }
-          } catch (e) {
-            // If we can't parse the error as JSON, use text
-            const errorText = await response.text();
-            console.error('Server response error (text):', errorText);
-            errorMsg = errorText || `Server request failed with status: ${response.status}`;
+          } catch (bodyError) {
+            console.error('Failed to read response body:', bodyError);
           }
           
           throw new Error(errorMsg);
         }
         
-        const data = await response.json();
-        console.log(`API processing completed in ${data.processingTime || 'unknown'}ms`);
-        
-        if (data.processingTime) {
-          setProcessingTime(data.processingTime);
+        // Handle successful response
+        try {
+          const responseClone = response.clone();
+          const responseText = await responseClone.text();
+          
+          try {
+            const data = JSON.parse(responseText);
+            console.log(`API processing completed in ${data.processingTime || 'unknown'}ms`);
+            
+            if (data.processingTime) {
+              setProcessingTime(data.processingTime);
+            }
+            
+            if (!data.success) {
+              throw new Error(data.error || 'Processing failed');
+            }
+            
+            // Set the results and CSV data
+            setApiResults(data.results.Results);
+            setCsvData({
+              csvString: data.csvString,
+              csvFileName: data.csvFileName
+            });
+            
+            setUploadState('success');
+          } catch (parseError) {
+            throw new Error('Invalid response format');
+          }
+        } catch (bodyError) {
+          console.error('Failed to read response body:', bodyError);
+          throw new Error('Failed to read response');
         }
-        
-        if (!data.success) {
-          throw new Error(data.error || 'Processing failed');
-        }
-        
-        // Set the results and CSV data
-        setApiResults(data.results.Results);
-        setCsvData({
-          csvString: data.csvString,
-          csvFileName: data.csvFileName
-        });
-        
-        setUploadState('success');
       } catch (fetchError: unknown) {
         // This catches abort errors from our controller
         if (fetchError instanceof Error && fetchError.name === 'AbortError') {
