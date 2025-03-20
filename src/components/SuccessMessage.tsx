@@ -4,42 +4,35 @@ import { CheckCircleIcon, DownloadIcon, RefreshCwIcon } from 'lucide-react';
 interface SuccessMessageProps {
   fileName: string;
   onReset: () => void;
-  csvPath: string | null;
+  csvData: {
+    csvString: string;
+    csvFileName: string;
+  } | null;
 }
 
 const SuccessMessage: React.FC<SuccessMessageProps> = ({
   fileName,
   onReset,
-  csvPath
+  csvData
 }) => {
   const handleDownload = () => {
-    if (csvPath) {
-      // For server-generated CSVs, use the server URL
-      const baseUrl = process.env.NODE_ENV === 'production' 
-        ? window.location.origin
-        : 'http://localhost:3001';
+    if (csvData && csvData.csvString) {
+      // Create a blob from the CSV string
+      const blob = new Blob([csvData.csvString], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
       
-      window.open(baseUrl + csvPath, '_blank');
+      // Create a temporary link and trigger download
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = csvData.csvFileName;
+      document.body.appendChild(a);
+      a.click();
+      
+      // Clean up
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
     } else {
-      // Fallback to localStorage method
-      const downloadUrl = localStorage.getItem('csvDownloadUrl');
-      const csvFileName = localStorage.getItem('csvFileName');
-      
-      if (downloadUrl && csvFileName) {
-        // Create an anchor element and set the download attributes
-        const a = document.createElement('a');
-        a.href = downloadUrl;
-        a.download = csvFileName;
-        document.body.appendChild(a);
-        
-        // Trigger the download
-        a.click();
-        
-        // Clean up
-        document.body.removeChild(a);
-      } else {
-        alert('Download link not available. Please try again.');
-      }
+      alert('CSV data not available. Please try again.');
     }
   };
 

@@ -25,7 +25,10 @@ export function App() {
   const [fileName, setFileName] = useState<string>('');
   const [errorMessage, setErrorMessage] = useState<string>('');
   const [apiResults, setApiResults] = useState<ApiResults | null>(null);
-  const [csvPath, setCsvPath] = useState<string | null>(null);
+  const [csvData, setCsvData] = useState<{
+    csvString: string;
+    csvFileName: string;
+  } | null>(null);
 
   const handleFileUpload = async (file: File) => {
     if (!file.name.endsWith('.bin')) {
@@ -38,15 +41,10 @@ export function App() {
     setUploadState('processing');
     
     try {
-      // Option 1: Use the server endpoint
-      const serverUrl = process.env.NODE_ENV === 'production' 
-        ? '/api/process-bin'
-        : 'http://localhost:3001/api/process-bin';
+      // Use the API endpoint
+      const serverUrl = '/api/process-bin';
       
-      // Send the file to our server
-      const formData = new FormData();
-      formData.append('file', file);
-      
+      // Send the file to our API
       const response = await fetch(serverUrl, {
         method: 'POST',
         body: file,
@@ -66,9 +64,12 @@ export function App() {
         throw new Error(data.error || 'Processing failed');
       }
       
-      // Set the results and CSV path
+      // Set the results and CSV data
       setApiResults(data.results.Results);
-      setCsvPath(data.csvPath);
+      setCsvData({
+        csvString: data.csvString,
+        csvFileName: data.csvFileName
+      });
       
       setUploadState('success');
     } catch (error) {
@@ -83,7 +84,7 @@ export function App() {
     setFileName('');
     setErrorMessage('');
     setApiResults(null);
-    setCsvPath(null);
+    setCsvData(null);
   };
 
   return (
@@ -109,7 +110,7 @@ export function App() {
               setUploadState={setUploadState} 
             /> : uploadState === 'processing' ? 
             <ProgressIndicator fileName={fileName} /> : uploadState === 'success' ? 
-            <SuccessMessage fileName={fileName} onReset={resetUpload} csvPath={csvPath} /> : 
+            <SuccessMessage fileName={fileName} onReset={resetUpload} csvData={csvData} /> : 
             <ErrorMessage message={errorMessage} onReset={resetUpload} />
           }
         </div>
